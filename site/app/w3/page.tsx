@@ -60,7 +60,9 @@ export default function MarketStreet() {
   const [purse, setPurse] = useState<number | null>(null);
   const [rain, setRain] = useState(false);
   const [faint, setFaint] = useState(false);
-  const [down, setDown] = useState(false);
+  const [down, _setDown] = useState(false);
+  const downRef = useRef(false);
+  const setDown = (v: boolean) => { downRef.current = v; _setDown(v); };
   const [morning, setMorning] = useState(false);
   const [monocle, setMonocle] = useState(false);
   const [events, setEvents] = useState<MonocleEvent[]>([]);
@@ -135,7 +137,7 @@ export default function MarketStreet() {
   // The service is gone. Nothing to do but wait for the shop to reopen — and then
   // ask the session what it remembers.
   const nightWatch = useCallback(() => {
-    setDown(true); setBusy(false);
+    setDown(true); setBusy(false); busyRef.current = false;
     const timer = setInterval(async () => {
       const ok = await fetch("/api/w3/health").then((r) => r.ok).catch(() => false);
       if (!ok) return;
@@ -217,7 +219,7 @@ export default function MarketStreet() {
 
   async function send(t: string, retry = false) {
     const msg = t.trim();
-    if (!msg || busyRef.current || down) return;
+    if (!msg || busyRef.current || downRef.current) return;
     setBusy(true); busyRef.current = true; setText("");
     if (!retry) say("me", msg);
     setStates({ desk: "live" });
@@ -245,7 +247,7 @@ export default function MarketStreet() {
 
   async function stamp(ok: boolean) {
     const w = waitingRef.current;
-    if (!w || busyRef.current || down) return;
+    if (!w || busyRef.current || downRef.current) return;
     setBusy(true); busyRef.current = true;
     setWaiting(null);
     setStates((s) => ({ ...s, approve: "done", refund: "live" }));
@@ -262,7 +264,7 @@ export default function MarketStreet() {
   }
 
   async function armFaint() {
-    if (down) return;
+    if (downRef.current) return;
     // Someone is waiting on a question: faint right now, card still up.
     if (waitingRef.current) {
       say("sys", "💥 the clerk fainted — with Odo's question still on the desk");
