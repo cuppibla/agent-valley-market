@@ -50,7 +50,7 @@ APP, USER = "street", "user"
 # ── where the shop keeps its memory ─────────────────────────────────────────
 # 👉 EDIT TWO — chapter 3. This is the whole edit. Replace the line below with:
 #
-#     _sessions = InMemorySessionService()
+#     _sessions = SqliteSessionService("market.db")
 #
 # In memory, the ledger lives inside this process and dies with it. In a file, it
 # does not — and `adk web --session_service_uri=sqlite:///market.db .` can read it.
