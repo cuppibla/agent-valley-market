@@ -358,7 +358,7 @@ export default function MarketStreet() {
                 <span className="mono" style={{ fontSize: 11.5, color: "var(--gold-deep)" }}>✦{it.price}</span>
               </button>
             ))}
-            <button className="rune" disabled={!stallOpen} onClick={() => send("I'd like to return the Star Lantern")}
+            <button className="rune" disabled={!stallOpen} onClick={() => send("I'd like to return my last order")}
               style={{ opacity: stallOpen ? 1 : .5 }}>return it</button>
           </div>
 
