@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+.DS_Store
+runs/
+out/
+.adk/
+*.db
+
+# a build artifact; it kept turning up in greps as noise
+site/tsconfig.tsbuildinfo
