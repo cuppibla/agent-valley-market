@@ -76,7 +76,6 @@ export default function MarketStreet() {
   const [store, setStore] = useState("");
   const [graphErr, setGraphErr] = useState<string | null>(null);
   const sid = useRef("");
-  const pending = useRef<{ text: string } | null>(null);   // a delivery the courier has not heard back on
   const k = useRef(0);
   const chatBox = useRef<HTMLDivElement>(null);
 
@@ -171,11 +170,9 @@ export default function MarketStreet() {
       const s = await fetch(`/api/w3/session/${sid.current}`).then((x) => x.json()).catch(() => null);
       line("☀️ the shop reopened · " + (s?.exists ? "same ledger" : "the ledger is gone"), s?.exists ? "ok" : "bad");
       say("sys", s?.exists ? "☀️ Morning. Twill still has your ledger." : "☀️ Morning. Twill has no idea who you are.");
-      if (pending.current) {
-        // No ack ever came, so the courier does what couriers do.
-        const again = pending.current.text;
-        setTimeout(() => { say("sys", "📦 the courier tries the same delivery again"); send(again, true); }, 1400);
-      }
+      // Nothing is re-sent here on purpose. If a parcel was out when the clerk
+      // fainted, its ticket either survived or it did not, and that difference is
+      // the whole of chapter 4 — re-ordering would paper over it.
     }, 1500);
   }, [loadGraph, restore]);        // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -259,7 +256,6 @@ export default function MarketStreet() {
     if (!retry) say("me", msg);
     setStates({ desk: "live" });
     const isBuy = /^buy\b/i.test(msg);
-    if (isBuy) pending.current = { text: msg };
     const res = await fetch("/api/w3/chat", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ session_id: sid.current, text: msg, purse: getSave()?.sparks ?? 30 }),
@@ -268,13 +264,8 @@ export default function MarketStreet() {
     setBusy(false); busyRef.current = false;
     if (outcome === "down") { nightWatch(); return; }
     if (isBuy) {
-      pending.current = null;
+      lastBuy.current = retry ? null : msg;      // what a lost reply would make the client repeat
       const s = getSave(); if (s && !s.stamps[2]) updateSave({ stamps: s.stamps.map((v, i) => (i === 2 ? true : v)) });
-      // ☔ The ack got lost. The courier knocks again with the same parcel — same
-      // order number — because that is what at-least-once delivery means.
-      if (rainRef.current && !retry) {
-        setTimeout(() => { say("sys", "☔ the ack was lost — the courier knocks again, same parcel"); send(msg, true); }, 1200);
-      }
     }
   }
   const busyRef = useRef(false);
@@ -282,6 +273,8 @@ export default function MarketStreet() {
   // Which node the run stopped on. If it stopped ON the clerk, the clerk is holding
   // the workflow open waiting for an answer — one node lit, everything after it dark.
   const lastNode = useRef<string>("");
+  // The last order the customer placed, kept only while ☔ is on.
+  const lastBuy = useRef<string | null>(null);
 
   // The courier reports back. Nobody is answering a question here — the world is
   // simply saying the parcel arrived, on the ticket it was given.
@@ -294,14 +287,29 @@ export default function MarketStreet() {
       body: JSON.stringify({ session_id: sid.current }) }).catch(() => null);
     const outcome = res ? await consume(res) : "down";
     setBusy(false); busyRef.current = false;
-    if (outcome === "down") nightWatch();
+    if (outcome === "down") { nightWatch(); return; }
+    // ☔ The sale is done and the reply never reached the client, so the client does
+    // what clients do: it sends the SAME order again, with the same order number.
+    // That is at-least-once, and it is why `charge` needs a guard.
+    const again = lastBuy.current;
+    if (rainRef.current && again) {
+      lastBuy.current = null;
+      await new Promise((r) => setTimeout(r, 900));
+      say("sys", "☔ the reply was lost — the client sends the same order again");
+      await send(again, true);
+      await new Promise((r) => setTimeout(r, 400));
+      await deliver();
+    }
   }
 
   async function armFaint() {
     if (downRef.current) return;
-    // Someone is waiting on a question: faint right now, card still up.
-    if (waitingRef.current) {
-      say("sys", "💥 the clerk fainted — with Odo's question still on the desk");
+    // The shop is holding something — a question, or a parcel. Faint on the spot,
+    // because the whole point is what happens to the thing it was holding.
+    if (waitingRef.current || parcelRef.current) {
+      say("sys", waitingRef.current
+        ? "💥 the clerk fainted — with Odo's question still on the desk"
+        : "💥 the clerk fainted — with the parcel still out");
       await fetch("/api/w3/weather", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ faint: false, now: true }) }).catch(() => {});
       setTimeout(() => nightWatch(), 600);
@@ -316,7 +324,7 @@ export default function MarketStreet() {
 
   function fresh() {
     sid.current = newSid(); localStorage.setItem(SID_KEY, sid.current);
-    setChat([]); setReceipt([]); setStates({}); setWaiting(null); setEvents([]); setSnap({}); pending.current = null;
+    setChat([]); setReceipt([]); setStates({}); setWaiting(null); setEvents([]); setSnap({}); lastBuy.current = null;
     say("sys", "a new conversation — same customer, same purse");
   }
 
@@ -367,7 +375,7 @@ export default function MarketStreet() {
             </div>
           </div>
 
-          <div ref={chatBox} style={{ flex: 1, minHeight: 240, maxHeight: 380, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10, padding: "16px 2px 8px" }}>
+          <div ref={chatBox} data-chat style={{ flex: 1, minHeight: 240, maxHeight: 380, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10, padding: "16px 2px 8px" }}>
             {chat.length === 0 && (
               <div className="b tw" style={bubble("twill")}>Welcome to Market Street. Everything&apos;s for sale — nothing may be sold twice.</div>
             )}
@@ -427,7 +435,7 @@ export default function MarketStreet() {
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <Icon on={rain} title="the courier is unreliable today — every parcel is delivered twice" onClick={() => setRain((r) => !r)}>☔</Icon>
-              <Icon on={faint} hot title={waiting ? "the clerk faints right now, question and all" : "the clerk faints on the next sale — the service exits mid-run"} onClick={armFaint}>💥</Icon>
+              <Icon on={faint} hot title={waiting || parcel ? "the clerk faints right now, holding what it is holding" : "the clerk faints on the next sale — the service exits mid-run"} onClick={armFaint}>💥</Icon>
               <Icon on={monocle} title="the Monocle — what the session holds" onClick={() => setMonocle((m) => !m)}>🧐</Icon>
             </div>
           </div>

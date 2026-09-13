@@ -284,9 +284,11 @@ async def _run(sid: str, message: types.Content, *, purse: int | None = None):
                 await asyncio.sleep(0.25)
                 os._exit(1)
     except Exception as exc:                       # noqa: BLE001
+        # A node blew up. That is not the shop dying — the session is intact and the
+        # browser should be told what it holds, or it will assume the worst and start
+        # waiting for a restart that is not coming.
         log.exception("run failed")
         yield _sse("error", message=f"{type(exc).__name__}: {exc}"[:300])
-        return
 
     sess = await _sessions.get_session(app_name=APP, user_id=USER, session_id=sid)
     stamp, parcel = _pending(sess) if sess else (None, None)
