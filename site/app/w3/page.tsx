@@ -320,7 +320,8 @@ export default function MarketStreet() {
   if (!save?.name) return <FamiliarPicker onDone={() => setSave(getSave())} />;
 
   const crew = (PATHS[path] ?? PATHS.buy).filter((n) => nodes.includes(n) || n === "notify" && nodes.includes("notify"));
-  const faces = { ...FACE, notify: save.portrait || "/world/icons/species/cat.jpg" };
+  // The courier is the learner's own familiar, so `dispatch` wears their face.
+  const faces = { ...FACE, dispatch: save.portrait || "/world/icons/species/cat.jpg" };
   const status = down ? "closed for the night" : waiting ? "waiting for the back room"
     : parcel ? "waiting for the courier" : busy ? "checking the ledger" : "at the counter";
   const dot = down ? "#6b6394" : waiting || parcel ? "var(--gold)" : busy ? "var(--violet)" : "var(--mint)";

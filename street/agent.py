@@ -202,6 +202,8 @@ def charge(ctx: Context, node_input: Any):
     #
     #     if ledger[key].get("charged"): return seen(ctx, key, order)
 
+    if ledger[key].get("charged"): return seen(ctx, key, order)
+
     if ledger[key]["status"] == PAID: return seen(order)
 
     purse = int(ctx.state.get(SPARKS, START_PURSE))
@@ -386,6 +388,7 @@ root_agent = Workflow(
         (clerk, route),
         (reserve, dispatch, charge, grant, reply),
         (verify,
+         approve,
          # 👉 EDIT TWO — chapter 3. Add `approve,` on the next line. One word: the
          #    graph now stops here and waits for the back office before any sparks move.
 

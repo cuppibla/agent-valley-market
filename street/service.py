@@ -55,7 +55,7 @@ APP, USER = "street", "user"
 #
 # In memory, the ledger lives inside this process and dies with it. In a file, it
 # does not — and `adk web --session_service_uri=sqlite:///market.db .` can read it.
-_sessions = InMemorySessionService()
+_sessions = SqliteSessionService("market.db")
 
 # The weather. ☔ is the courier being unreliable, and lives in the browser (it
 # knocks twice). 💥 is the clerk fainting, and has to live here: the process is
