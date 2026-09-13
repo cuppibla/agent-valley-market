@@ -9,7 +9,9 @@ import { useMemo } from "react";
  * workflow does.
  */
 
-export type CrewState = "idle" | "live" | "done" | "waiting";
+// "refused" is not a failure of the node. It is a node that tried something a rule
+// forbids, and the rule won — see street/auditor.py.
+export type CrewState = "idle" | "live" | "done" | "waiting" | "refused";
 
 export default function BackRoom({ nodes, states, faces, names, roles, courier, night, morning }: {
   nodes: string[]; states: Record<string, CrewState>; faces: Record<string, string>;
@@ -50,32 +52,36 @@ export default function BackRoom({ nodes, states, faces, names, roles, courier, 
       {pos.map(({ n, x, y }) => {
         const s = states[n] ?? "idle";
         const ring = s === "done" ? "var(--mint)" : s === "live" ? "var(--violet)"
-          : s === "waiting" ? "var(--gold)" : night ? "rgba(120,110,160,.5)" : "rgba(176,143,224,.35)";
+          : s === "waiting" ? "var(--gold)" : s === "refused" ? "var(--rose)"
+          : night ? "rgba(120,110,160,.5)" : "rgba(176,143,224,.35)";
         return (
           <div key={n} style={{ position: "absolute", left: x, top: y - R, transform: "translateX(-50%)",
             width: 120, textAlign: "center", transition: "opacity .5s", opacity: s === "idle" ? .55 : 1 }}>
             <div style={{ width: R * 2, height: R * 2, borderRadius: "50%", margin: "0 auto", padding: 4,
               background: night ? "#2a2547" : "#fff", border: `3px solid ${ring}`, position: "relative",
               boxShadow: s === "waiting" ? "0 0 0 6px rgba(230,192,105,.22), 0 0 30px rgba(230,192,105,.55)"
+                : s === "refused" ? "0 0 0 6px rgba(229,138,168,.25), 0 0 26px rgba(229,138,168,.5)"
                 : s === "live" ? "0 0 0 6px rgba(138,107,255,.15)" : "0 6px 18px rgba(120,100,180,.15)",
               transition: "border-color .4s, box-shadow .4s, background .8s",
               animation: s === "live" ? "floaty 1.4s ease-in-out infinite" : "none" }}>
               <img src={faces[n]} alt={names[n] ?? n} width={R * 2 - 8} height={R * 2 - 8}
                 style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover", display: "block",
                   filter: s === "idle" ? "saturate(.25)" : "none", transition: "filter .5s" }} />
-              {(s === "done" || s === "waiting") && (
+              {(s === "done" || s === "waiting" || s === "refused") && (
                 <span style={{ position: "absolute", right: -4, bottom: -2, width: 30, height: 30, borderRadius: "50%",
                   display: "grid", placeItems: "center", fontSize: s === "done" ? 14 : 15, fontWeight: 700,
                   background: s === "done" ? "var(--mint)" : "#fff", color: "#fff", border: "2px solid #fff",
-                  boxShadow: "0 2px 8px rgba(120,100,180,.25)" }}>{s === "done" ? "✓" : "✋"}</span>
+                  boxShadow: "0 2px 8px rgba(120,100,180,.25)" }}>
+                  {s === "done" ? "✓" : s === "refused" ? "🛡" : "✋"}</span>
               )}
             </div>
             <div className="serif" style={{ fontSize: 14.5, fontWeight: 600, marginTop: 7,
               color: night ? "#efeaff" : "var(--ink)", transition: "color .8s" }}>{names[n] ?? n}</div>
             <div className="mono" style={{ fontSize: 9.5, letterSpacing: ".08em", textTransform: "uppercase",
-              color: s === "waiting" ? "var(--gold-deep)" : night ? "#b6acd6" : "var(--faint)",
-              fontWeight: s === "waiting" ? 700 : 500 }}>
-              {s === "waiting" ? "waiting for you" : roles[n] ?? n}
+              color: s === "waiting" ? "var(--gold-deep)" : s === "refused" ? "#b03e64"
+                : night ? "#b6acd6" : "var(--faint)",
+              fontWeight: s === "waiting" || s === "refused" ? 700 : 500 }}>
+              {s === "waiting" ? "waiting for you" : s === "refused" ? "refused" : roles[n] ?? n}
             </div>
           </div>
         );

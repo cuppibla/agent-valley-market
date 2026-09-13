@@ -37,6 +37,7 @@ from google.adk.workflow.utils._workflow_hitl_utils import (  # noqa: E402
     create_request_input_response, get_request_input_interrupt_ids)
 from google.genai import types  # noqa: E402
 
+from street.auditor import Auditor  # noqa: E402
 from street.lookups import ITEMS, OPENING_STOCK, START_PURSE  # noqa: E402
 from street.state import ORDERS, SPARKS, STOCK  # noqa: E402
 
@@ -55,7 +56,7 @@ APP, USER = "street", "user"
 #
 # In memory, the ledger lives inside this process and dies with it. In a file, it
 # does not — and `adk web --session_service_uri=sqlite:///market.db .` can read it.
-_sessions = SqliteSessionService("market.db")
+_sessions = InMemorySessionService()
 
 # The weather. ☔ is the courier being unreliable, and lives in the browser (it
 # knocks twice). 💥 is the clerk fainting, and has to live here: the process is
@@ -63,6 +64,9 @@ _sessions = SqliteSessionService("market.db")
 FAINT = False
 
 _last_good = None
+
+# One rule the whole shop keeps, watching every node's state_delta. See auditor.py.
+_auditor = Auditor()
 
 
 # ── the learner's graph ─────────────────────────────────────────────────────
@@ -244,7 +248,7 @@ async def _run(sid: str, message: types.Content, *, purse: int | None = None):
         delta[STOCK] = dict(OPENING_STOCK)
     delta = delta or None
 
-    runner = Runner(app_name=APP, agent=wf, session_service=_sessions)
+    runner = Runner(app_name=APP, agent=wf, session_service=_sessions, plugins=[_auditor])
     t0 = time.monotonic()
     try:
         async for ev in runner.run_async(user_id=USER, session_id=sid, new_message=message,

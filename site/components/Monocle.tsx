@@ -58,7 +58,7 @@ export default function Monocle({ open, onClose, events, state, store, sid }: {
               <span style={{ color: e.author === "user" ? "#f2cf86" : "#b6a9d8", display: "inline-block", minWidth: 62 }}>
                 {e.author === "user" ? (e.answer ? "you ✓" : "you") : e.node}
               </span>
-              <span style={{ color: e.interrupt ? "#f2cf86" : "#d9d0f0" }}>
+              <span style={{ color: e.interrupt ? "#f2cf86" : (e.text || "").startsWith("auditor ·") ? "#f2a0b4" : "#d9d0f0" }}>
                 {e.interrupt ? `⏸ ${e.interrupt.message}` : short(e.text)}
               </span>
               {e.route && <span style={{ color: "#cdbcf5" }}> → {e.route}</span>}

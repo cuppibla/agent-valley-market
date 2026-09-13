@@ -213,6 +213,11 @@ export default function MarketStreet() {
             if (d.node === "charge" && d.text.includes("seen")) line(d.text, "ok");
             if (d.node === "verify" && d.text.includes("nothing")) line(d.text, "dim");
             if (["reply", "twill", "clerk"].includes(d.node) && d.text) say("twill", d.text);
+            // A rule the shop keeps, refusing a write — see street/auditor.py.
+            if (d.text.startsWith("auditor ·")) {
+              setStates((st) => ({ ...st, [d.node]: "refused" as CrewState }));
+              say("sys", "🛡 " + d.text);
+            }
             if (d.node) lastNode.current = d.node;
             setEvents((e) => [...e, { author: "street", node: d.node, text: d.text, route: d.route, delta: d.delta }]);
           } else if (d.kind === "interrupt") {

@@ -202,10 +202,6 @@ def charge(ctx: Context, node_input: Any):
     #
     #     if ledger[key].get("charged"): return seen(ctx, key, order)
 
-    if ledger[key].get("charged"): return seen(ctx, key, order)
-
-    if ledger[key]["status"] == PAID: return seen(order)
-
     purse = int(ctx.state.get(SPARKS, START_PURSE))
     ctx.state[SPARKS] = purse - order["price"]
     # `charged` is the fact the guard reads, and unlike `status` nothing ever unsets
@@ -232,6 +228,12 @@ def grant(ctx: Context, node_input: Any):
     if not order.get("key"):
         return Event(message="grant · nothing to hang", output=order)
     worn = list(ctx.state.get(INVENTORY, []))
+
+    # 👉 TRY IT — chapter 5. Uncomment this line and buy something. `grant` has no
+    #    business in the till, and the auditor in `street/auditor.py` will say so.
+    #
+    #     ctx.state[SPARKS] = 999
+
     if order["item"] not in worn:
         worn.append(order["item"])
         ctx.state[INVENTORY] = worn
@@ -388,7 +390,6 @@ root_agent = Workflow(
         (clerk, route),
         (reserve, dispatch, charge, grant, reply),
         (verify,
-         approve,
          # 👉 EDIT TWO — chapter 3. Add `approve,` on the next line. One word: the
          #    graph now stops here and waits for the back office before any sparks move.
 
