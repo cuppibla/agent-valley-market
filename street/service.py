@@ -285,8 +285,8 @@ async def _run(sid: str, message: types.Content, *, purse: int | None = None):
         return
 
     sess = await _sessions.get_session(app_name=APP, user_id=USER, session_id=sid)
-    yield _sse("state", state=dict(sess.state) if sess else {},
-               waiting=_summary(sess)["waiting"] if sess else None,
+    stamp, parcel = _pending(sess) if sess else (None, None)
+    yield _sse("state", state=dict(sess.state) if sess else {}, waiting=stamp, parcel=parcel,
                seconds=round(time.monotonic() - t0, 1))
 
 

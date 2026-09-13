@@ -19,21 +19,22 @@ import { getSave, updateSave, type SaveFile } from "@/lib/save";
 // so a node that is not in your edges list (`approve`, before chapter 4) is simply
 // not there.
 const PATHS: Record<string, string[]> = {
-  buy: ["desk", "reserve", "charge", "grant", "notify"],
-  return: ["desk", "verify", "approve", "refund", "record"],
+  buy: ["desk", "reserve", "dispatch", "charge", "grant"],
+  pick: ["desk", "clerk"],
+  return: ["desk", "verify", "approve", "refund"],
   ask: ["desk", "twill"],
 };
 const FACE: Record<string, string> = {
   desk: "/world/npc/twill.jpg", twill: "/world/npc/twill.jpg",
-  reserve: "/world/npc/vesper.jpg", refund: "/world/npc/vesper.jpg",
+  clerk: "/world/npc/vesper.jpg", refund: "/world/npc/vesper.jpg",
   charge: "/world/npc/maren.jpg", verify: "/world/npc/maren.jpg",
-  grant: "/world/npc/nix.jpg", record: "/world/npc/nix.jpg",
+  reserve: "/world/npc/nix.jpg", grant: "/world/npc/nix.jpg",
   approve: "/world/npc/odo-stamp.jpg",
 };
-const NAME: Record<string, string> = { desk: "Twill", twill: "Twill", reserve: "Vesper", refund: "Vesper",
-  charge: "Maren", verify: "Maren", grant: "Nix", record: "Nix", approve: "Odo", notify: "you" };
-const ROLE: Record<string, string> = { desk: "desk", twill: "answers", reserve: "reserve", charge: "charge",
-  grant: "grant", notify: "notify", verify: "verify", approve: "manager", refund: "refund", record: "record" };
+const NAME: Record<string, string> = { desk: "Twill", twill: "Twill", clerk: "Vesper", refund: "Vesper",
+  charge: "Maren", verify: "Maren", reserve: "Nix", grant: "Nix", approve: "Odo", dispatch: "you" };
+const ROLE: Record<string, string> = { desk: "desk", twill: "answers", clerk: "asks you", reserve: "reserve",
+  dispatch: "courier", charge: "charge", grant: "grant", verify: "verify", approve: "manager", refund: "refund" };
 
 type Item = { id: string; name: string; price: number; blurb: string; icon: string };
 type Bubble = { who: "me" | "twill" | "sys"; text: string; k: number };
@@ -55,7 +56,12 @@ export default function MarketStreet() {
   const [waiting, _setWaiting] = useState<Waiting>(null);
   const waitingRef = useRef<Waiting>(null);
   const setWaiting = (w: Waiting) => { waitingRef.current = w; _setWaiting(w); };
-  const [note, setNote] = useState("");
+  // The other thing a run can be holding. Not a question — nobody was asked
+  // anything — just a parcel that is still out.
+  const [parcel, _setParcel] = useState<{ order?: string } | null>(null);
+  const parcelRef = useRef<{ order?: string } | null>(null);
+  const setParcel = (p: { order?: string } | null) => { parcelRef.current = p; _setParcel(p); };
+  const [shelf, setShelf] = useState<Record<string, number>>({});
   const [receipt, setReceipt] = useState<{ t: string; tone?: string }[]>([]);
   const [purse, setPurse] = useState<number | null>(null);
   const [rain, setRain] = useState(false);
@@ -86,6 +92,14 @@ export default function MarketStreet() {
   }, []);
   useEffect(() => { const id = requestAnimationFrame(() => { const el = chatBox.current; if (el) el.scrollTop = el.scrollHeight; }); return () => cancelAnimationFrame(id); }, [chat, waiting, busy]);
 
+  // While the back office is holding a question, the answer arrives on a different
+  // screen — so this one has to look.
+  useEffect(() => {
+    if (!waiting || down) return;
+    const t = setInterval(() => { if (!busyRef.current) restoreRef.current?.(true); }, 2500);
+    return () => clearInterval(t);
+  }, [waiting, down]);
+
   const loadGraph = useCallback(async () => {
     const r = await fetch("/api/w3/graph").then((x) => x.json()).catch(() => null);
     if (!r?.graph) { setGraphErr("the street isn't running — bash valley.sh"); return null; }
@@ -110,20 +124,28 @@ export default function MarketStreet() {
     setEvents(s.events); setSnap(s.state);
     if (typeof s.state["user:sparks"] === "number") { setPurse(s.state["user:sparks"]); updateSave({ sparks: s.state["user:sparks"] }); }
     setWaiting(s.waiting ? { id: s.waiting.id, message: s.waiting.message, payload: s.waiting.payload } : null);
+    setParcel(s.parcel ? { order: s.parcel.order } : null);
+    if (s.state?.["app:stock"]) setShelf(s.state["app:stock"]);
     // the chat, the receipt and the crew, from the events
     const bubbles: Bubble[] = []; const slip: { t: string; tone?: string }[] = [];
     let lastPath = "buy"; const st: Record<string, CrewState> = {};
     for (const e of s.events as (MonocleEvent & { interrupt?: { node: string; message: string } })[]) {
       if (e.author === "user" && e.text) { bubbles.push({ who: "me", text: e.text, k: k.current++ }); Object.keys(st).forEach((n) => delete st[n]); }
-      else if ((e.node === "reply" || e.node === "twill") && e.text) bubbles.push({ who: "twill", text: e.text, k: k.current++ });
+      else if (["reply", "twill", "clerk"].includes(e.node) && e.text) bubbles.push({ who: "twill", text: e.text, k: k.current++ });
       else if (e.interrupt) { bubbles.push({ who: "twill", text: "This one needs the manager's stamp — one moment.", k: k.current++ }); st[e.node] = "waiting"; }
       if (e.route && PATHS[e.route]) lastPath = e.route;
       if (e.node && e.node !== "route" && !e.interrupt) st[e.node] = "done";
-      if (["charge", "refund"].includes(e.node) && e.text) slip.push({ t: e.text, tone: e.text.includes("seen") ? "ok" : undefined });
+      if (e.node) lastNode.current = e.node;
+      if (e.node === "charge" && e.text.includes("seen")) slip.push({ t: e.text, tone: "ok" });
       if (e.node === "verify" && e.text?.includes("nothing")) slip.push({ t: e.text, tone: "dim" });
     }
+    if (lastNode.current === "clerk" && !s.waiting && !s.parcel) st["clerk"] = "waiting";
+    if (s.parcel) st["dispatch"] = "waiting";
     setChat(bubbles); setReceipt(slip.slice(-8)); setPath(lastPath); setStates(st);
   }, []);
+
+  const restoreRef = useRef<((silent?: boolean) => Promise<void>) | null>(null);
+  useEffect(() => { restoreRef.current = restore; }, [restore]);
 
   useEffect(() => {
     sid.current = localStorage.getItem(SID_KEY) || "";
@@ -174,6 +196,7 @@ export default function MarketStreet() {
           if (d.kind === "graph") { setNodes(d.graph.nodes); setGraphErr(d.graph_error ?? null); setStore(d.store ?? ""); }
           else if (d.kind === "node") {
             if (d.node === "route" && d.route) { setPath(PATHS[d.route] ? d.route : "ask"); setStates({ desk: "done", [PATHS[d.route]?.[1] ?? "twill"]: "live" }); }
+            else if (d.node === "clerk") { /* the clerk's own turn — handled below */ }
             else {
               setStates((s) => {
                 const next: Record<string, CrewState> = { ...s, [d.node]: "done" };
@@ -187,9 +210,10 @@ export default function MarketStreet() {
             // A clerk who faints after `charge` has still charged you.
             if (typeof d.delta?.["user:sparks"] === "number") { setPurse(d.delta["user:sparks"]); updateSave({ sparks: d.delta["user:sparks"] }); }
             if (Array.isArray(d.delta?.["user:inventory"])) updateSave({ inventory: d.delta["user:inventory"] });
-            if (["charge", "refund"].includes(d.node)) line(d.text, d.text.includes("seen") ? "ok" : undefined);
+            if (d.node === "charge" && d.text.includes("seen")) line(d.text, "ok");
             if (d.node === "verify" && d.text.includes("nothing")) line(d.text, "dim");
-            if ((d.node === "reply" || d.node === "twill") && d.text) say("twill", d.text);
+            if (["reply", "twill", "clerk"].includes(d.node) && d.text) say("twill", d.text);
+            if (d.node) lastNode.current = d.node;
             setEvents((e) => [...e, { author: "street", node: d.node, text: d.text, route: d.route, delta: d.delta }]);
           } else if (d.kind === "interrupt") {
             paused = true;
@@ -206,6 +230,12 @@ export default function MarketStreet() {
             if (Array.isArray(d.state["user:inventory"])) updateSave({ inventory: d.state["user:inventory"] });
             setStates((s) => Object.fromEntries(Object.entries(s).map(([n, v]) => [n, v === "live" ? "idle" : v])) as Record<string, CrewState>);
             if (!d.waiting) setWaiting(null);
+            setParcel(d.parcel ? { order: d.parcel.order } : null);
+            if (d.state["app:stock"]) setShelf(d.state["app:stock"]);
+            if (d.parcel) setStates((s) => ({ ...s, dispatch: "waiting" }));
+            if (lastNode.current === "clerk" && !d.waiting && !d.parcel) {
+              setStates((s) => ({ ...s, clerk: "waiting" }));
+            }
           } else if (d.kind === "down") { say("sys", d.message); return "down"; }
           else if (d.kind === "error") { say("sys", d.message); }
         }
@@ -244,20 +274,19 @@ export default function MarketStreet() {
   }
   const busyRef = useRef(false);
   const rainRef = useRef(rain); useEffect(() => { rainRef.current = rain; }, [rain]);
+  // Which node the run stopped on. If it stopped ON the clerk, the clerk is holding
+  // the workflow open waiting for an answer — one node lit, everything after it dark.
+  const lastNode = useRef<string>("");
 
-  async function stamp(ok: boolean) {
-    const w = waitingRef.current;
-    if (!w || busyRef.current || downRef.current) return;
+  // The courier reports back. Nobody is answering a question here — the world is
+  // simply saying the parcel arrived, on the ticket it was given.
+  async function deliver() {
+    if (busyRef.current || downRef.current || !parcelRef.current) return;
     setBusy(true); busyRef.current = true;
-    setWaiting(null);
-    setStates((s) => ({ ...s, approve: "done", refund: "live" }));
-    say("sys", ok ? "✓ you stamped it" : "↩ you declined" + (note.trim() ? ` — ${note.trim()}` : ""));
-    setEvents((e) => [...e, { author: "user", node: "", text: "", delta: {}, answer: true }]);
-    const res = await fetch("/api/w3/stamp", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ session_id: sid.current, interrupt_id: w.id, ok, note: note.trim() }),
-    }).catch(() => null);
-    setNote("");
+    say("sys", "🔔 the courier knocks");
+    setStates((s) => ({ ...s, dispatch: "done", charge: "live" }));
+    const res = await fetch("/api/w3/delivered", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ session_id: sid.current }) }).catch(() => null);
     const outcome = res ? await consume(res) : "down";
     setBusy(false); busyRef.current = false;
     if (outcome === "down") nightWatch();
@@ -292,9 +321,11 @@ export default function MarketStreet() {
 
   const crew = (PATHS[path] ?? PATHS.buy).filter((n) => nodes.includes(n) || n === "notify" && nodes.includes("notify"));
   const faces = { ...FACE, notify: save.portrait || "/world/icons/species/cat.jpg" };
-  const status = down ? "closed for the night" : waiting ? "waiting for the back room" : busy ? "checking the ledger" : "at the counter";
-  const dot = down ? "#6b6394" : waiting ? "var(--gold)" : busy ? "var(--violet)" : "var(--mint)";
-  const stallOpen = !busy && !down && !waiting;
+  const status = down ? "closed for the night" : waiting ? "waiting for the back room"
+    : parcel ? "waiting for the courier" : busy ? "checking the ledger" : "at the counter";
+  const dot = down ? "#6b6394" : waiting || parcel ? "var(--gold)" : busy ? "var(--violet)" : "var(--mint)";
+  const stallOpen = !busy && !down && !waiting && !parcel;
+  const orders = (snap["orders"] ?? {}) as Record<string, { name: string; price: number; status: string; charged?: boolean }>;
 
   return (
     <div className="wrap" style={{ paddingBottom: 30 }}>
@@ -352,12 +383,15 @@ export default function MarketStreet() {
           {/* the stall */}
           <div style={{ display: "flex", gap: 8, padding: "8px 0 10px", flexWrap: "wrap" }}>
             {items.map((it) => (
-              <button key={it.id} disabled={!stallOpen} onClick={() => send(`buy the ${it.name} · order ${newKey()}`)}
+              <button key={it.id} disabled={!stallOpen || shelf[it.id] === 0}
+                onClick={() => send(`buy the ${it.name} · order ${newKey()}`)}
                 title={it.blurb} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px 6px 6px", borderRadius: 14,
                   border: "1px solid var(--line)", background: "#fff", opacity: stallOpen ? 1 : .5, cursor: stallOpen ? "pointer" : "default" }}>
                 <img src={it.icon} alt="" width={30} height={30} style={{ width: 30, height: 30, borderRadius: 9, objectFit: "cover" }} />
                 <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{it.name}</span>
                 <span className="mono" style={{ fontSize: 11.5, color: "var(--gold-deep)" }}>✦{it.price}</span>
+                <span className="mono" style={{ fontSize: 10.5, color: shelf[it.id] === 0 ? "var(--rose)" : "var(--faint)" }}>
+                  {shelf[it.id] === 0 ? "sold out" : shelf[it.id] != null ? `${shelf[it.id]} left` : ""}</span>
               </button>
             ))}
             <button className="rune" disabled={!stallOpen} onClick={() => send("I'd like to return my last order")}
@@ -397,31 +431,65 @@ export default function MarketStreet() {
               courier={save.portrait || "/world/icons/species/cat.jpg"} night={down} morning={morning} />
           </div>
 
-          {waiting && (
+          {parcel && !down && (
             <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 18px", borderRadius: 20, background: "#fff",
-              border: "1.5px solid var(--gold)", boxShadow: "0 12px 34px rgba(230,192,105,.25)", animation: "riseIn .35s ease both",
-              opacity: down ? .5 : 1 }}>
-              <img src="/world/npc/odo-stamp.jpg" alt="Odo" width={66} height={66} style={{ width: 66, height: 66, borderRadius: 16, objectFit: "cover", border: "3px solid var(--gold)" }} />
+              border: "1.5px solid var(--gold)", boxShadow: "0 12px 34px rgba(230,192,105,.25)", animation: "riseIn .35s ease both" }}>
+              <img src={save.portrait || "/world/icons/species/cat.jpg"} alt="the courier" width={66} height={66}
+                style={{ width: 66, height: 66, borderRadius: 16, objectFit: "cover", border: "3px solid var(--gold)" }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="serif" style={{ fontSize: 18, fontWeight: 600 }}>Order {parcel.order} is out for delivery</div>
+                <div className="mono" style={{ fontSize: 11.5, color: "var(--sub)", marginTop: 3 }}>
+                  the run has ended · nobody was asked anything · nothing is charged until it arrives
+                </div>
+              </div>
+              <button onClick={deliver} disabled={busy} style={btn("ok")}>🔔 the courier knocks</button>
+            </div>
+          )}
+
+          {waiting && !down && (
+            <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 18px", borderRadius: 20, background: "#fff",
+              border: "1.5px solid var(--gold)", boxShadow: "0 12px 34px rgba(230,192,105,.25)", animation: "riseIn .35s ease both" }}>
+              <img src="/world/npc/odo-stamp.jpg" alt="Odo" width={66} height={66}
+                style={{ width: 66, height: 66, borderRadius: 16, objectFit: "cover", border: "3px solid var(--gold)" }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="serif" style={{ fontSize: 18, fontWeight: 600 }}>{waiting.message}</div>
-                <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="if not — why? (the customer will hear it)"
-                  style={{ marginTop: 6, width: "100%", fontSize: 12.5, padding: "6px 10px", borderRadius: 9, border: "1px solid var(--line)", background: "#fffdf6", color: "var(--ink)" }} />
+                <div className="mono" style={{ fontSize: 11.5, color: "var(--sub)", marginTop: 3 }}>
+                  this one is not yours to answer · it is waiting in <b>the back office</b>
+                </div>
               </div>
-              <button onClick={() => stamp(true)} disabled={busy || down} style={btn("ok")}>Stamp it ✓</button>
-              <button onClick={() => stamp(false)} disabled={busy || down} style={btn("no")}>Decline ↩</button>
+              <a href="/w3/back" target="_blank" rel="noreferrer" style={{ ...btn("ok"), textDecoration: "none" }}>open the back office ↗</a>
             </div>
           )}
 
           <div style={{ display: "flex", gap: 14, marginTop: 14, alignItems: "stretch" }}>
             <div style={{ flex: 1, background: "#fffdf8", border: "1px solid var(--line)", borderRadius: 12, padding: "10px 14px", position: "relative", minHeight: 96 }}>
-              <div className="mono" style={{ fontSize: 10, letterSpacing: ".16em", textTransform: "uppercase", color: "var(--gold-deep)", marginBottom: 4 }}>
+              <div className="mono" style={{ fontSize: 10, letterSpacing: ".16em", textTransform: "uppercase", color: "var(--gold-deep)", marginBottom: 6 }}>
                 the ledger · {store ? (store.startsWith("Sqlite") ? "market.db" : "in memory") : "…"}
               </div>
-              {receipt.length === 0 && <div className="mono" style={{ fontSize: 12, color: "var(--faint)" }}>nothing sold yet</div>}
-              {receipt.map((r, i) => (
-                <div key={i} className="mono" style={{ fontSize: 12, lineHeight: 1.7,
-                  color: r.tone === "ok" ? "#2f7d67" : r.tone === "bad" ? "#b03e64" : r.tone === "dim" ? "var(--faint)" : "var(--sub)",
-                  fontWeight: r.tone === "ok" || r.tone === "bad" ? 600 : 400 }}>{r.t}</div>
+              {/* Rendered straight from `orders` in state — the status column is where
+                  every pause in this shop has its name. */}
+              {Object.keys(orders).length === 0 && (
+                <div className="mono" style={{ fontSize: 12, color: "var(--faint)" }}>nothing ordered yet</div>
+              )}
+              {Object.entries(orders).map(([key, o]) => {
+                const tone = o.status === "paid" ? "#2f7d67" : o.status === "out_for_delivery" ? "var(--gold-deep)"
+                  : o.status === "refunded" ? "var(--violet)" : "var(--sub)";
+                return (
+                  <div key={key} className="mono" style={{ display: "grid", gridTemplateColumns: "62px 1fr 34px 128px",
+                    gap: 8, fontSize: 12, lineHeight: 1.9, alignItems: "baseline" }}>
+                    <span style={{ color: "var(--faint)" }}>{key}</span>
+                    <span style={{ color: "var(--sub)" }}>{o.name}</span>
+                    <span style={{ color: "var(--gold-deep)" }}>✦{o.price}</span>
+                    <span style={{ color: tone, fontWeight: 600 }}>
+                      {o.status === "out_for_delivery" ? "out for delivery" : o.status}
+                      {o.status === "paid" && o.charged ? " ✓" : ""}
+                    </span>
+                  </div>
+                );
+              })}
+              {receipt.slice(-2).map((r, i) => (
+                <div key={"n" + i} className="mono" style={{ fontSize: 11.5, lineHeight: 1.8, marginTop: 3,
+                  color: r.tone === "ok" ? "#2f7d67" : r.tone === "bad" ? "#b03e64" : "var(--faint)" }}>{r.t}</div>
               ))}
               <div aria-hidden style={{ position: "absolute", left: 0, right: 0, bottom: -1, height: 8,
                 background: "repeating-linear-gradient(90deg,#fffdf8 0 10px,transparent 10px 16px)" }} />
