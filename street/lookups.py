@@ -13,6 +13,10 @@ ITEMS: dict[str, dict] = {
 
 START_PURSE = 30          # every familiar arrives on Market Street with thirty sparks
 
+#: What is on the shelf at opening time. This is `app:` state — ONE shelf, shared by
+#: every customer who walks in, which is the whole of what "app" scope means.
+OPENING_STOCK: dict[str, int] = {"star-lantern": 3, "cape": 2, "charm": 4}
+
 
 def stall() -> str:
     """The stall as a model reads it — one line per item, id first."""

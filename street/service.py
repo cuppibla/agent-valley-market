@@ -37,7 +37,8 @@ from google.adk.workflow.utils._workflow_hitl_utils import (  # noqa: E402
     create_request_input_response, get_request_input_interrupt_ids)
 from google.genai import types  # noqa: E402
 
-from street.lookups import ITEMS, START_PURSE  # noqa: E402
+from street.lookups import ITEMS, OPENING_STOCK, START_PURSE  # noqa: E402
+from street.state import ORDERS, SPARKS, STOCK  # noqa: E402
 
 log = logging.getLogger(__name__)
 app = FastAPI(title="Agent 101 · W3 Market Street")
@@ -135,6 +136,47 @@ def _text_of(ev) -> str:
     return " ".join(p.text.strip() for p in parts if p.text and p.text.strip())
 
 
+def _pending(sess) -> tuple[dict | None, dict | None]:
+    """What this run is holding, if anything: a question, or a parcel.
+
+    Both are long-running function calls — an interrupt IS a long-running tool with
+    a schema and an id — but they finish differently. A question is over as soon as
+    ANY response carries its id. A long-running tool answers itself once, with a
+    placeholder, and is still out; so the parcel is pending exactly when the ledger
+    says an order is out for delivery, which is the ledger doing its job.
+    """
+    answered: set[str] = set()
+    for ev in sess.events:
+        for p in (ev.content.parts if ev.content else []) or []:
+            if p.function_response and p.function_response.id:
+                answered.add(p.function_response.id)
+
+    stamp = None
+    for ev in sess.events:
+        ids = get_request_input_interrupt_ids(ev)
+        if not ids:
+            continue
+        call = next((p.function_call for p in (ev.content.parts if ev.content else []) or []
+                     if p.function_call), None)
+        if call and call.id not in answered:
+            stamp = {"id": ids[0], "message": call.args.get("message"),
+                     "payload": call.args.get("payload"), "node": _node_of(ev)}
+
+    parcel = None
+    out = [k for k, v in (sess.state.get(ORDERS) or {}).items()
+           if v.get("status") == "out_for_delivery"]
+    if out:
+        for ev in sess.events:
+            if not ev.long_running_tool_ids:
+                continue
+            for p in (ev.content.parts if ev.content else []) or []:
+                if p.function_call and p.function_call.name == "hand_to_courier" \
+                        and p.function_call.id in ev.long_running_tool_ids:
+                    parcel = {"call_id": p.function_call.id,
+                              "order": (p.function_call.args or {}).get("order") or out[-1]}
+    return stamp, parcel
+
+
 def _summary(sess) -> dict:
     """Every event, compact, plus what the graph is waiting on, if anything.
 
@@ -142,7 +184,7 @@ def _summary(sess) -> dict:
     That is exactly what the graph itself would find, and it is why a question
     survives a restart — it is in the same file as the ledger.
     """
-    events, waiting = [], None
+    events = []
     for ev in sess.events:
         parts = (ev.content.parts if ev.content else []) or []
         ids = get_request_input_interrupt_ids(ev)
@@ -156,13 +198,12 @@ def _summary(sess) -> dict:
             call = next(p.function_call for p in parts if p.function_call)
             e["interrupt"] = {"id": ids[0], "message": call.args.get("message"),
                               "payload": call.args.get("payload"), "node": node}
-            waiting = e["interrupt"]
         elif answered:
             e["answer"] = True
-            waiting = None
         events.append(e)
+    stamp, parcel = _pending(sess)
     return {"exists": True, "id": sess.id, "state": dict(sess.state), "events": events,
-            "waiting": waiting}
+            "waiting": stamp, "parcel": parcel}
 
 
 @app.get("/session/{sid}")
@@ -194,9 +235,14 @@ async def _run(sid: str, message: types.Content, *, purse: int | None = None):
     # A new customer starts with a purse. A known one keeps theirs — `user:` state
     # follows the customer, not the conversation, and this is the first place that
     # shows.
-    delta = None
-    if "user:sparks" not in sess.state:
-        delta = {"user:sparks": int(purse) if purse is not None else START_PURSE}
+    delta = {}
+    if SPARKS not in sess.state:
+        delta[SPARKS] = int(purse) if purse is not None else START_PURSE
+    # The shelf belongs to the shop, not to this conversation. It is seeded once,
+    # and every customer after that draws from the same one.
+    if STOCK not in sess.state:
+        delta[STOCK] = dict(OPENING_STOCK)
+    delta = delta or None
 
     runner = Runner(app_name=APP, agent=wf, session_service=_sessions)
     t0 = time.monotonic()
@@ -229,7 +275,7 @@ async def _run(sid: str, message: types.Content, *, purse: int | None = None):
             # taken and written down, the courier never hears back. The process
             # ends here — not an exception, the whole process — which is the only
             # honest way to find out where the ledger really lives.
-            if FAINT and node == "grant":
+            if FAINT and node in ("dispatch", "charge"):
                 yield _sse("faint", node=node)
                 await asyncio.sleep(0.25)
                 os._exit(1)
@@ -257,6 +303,47 @@ async def chat(req: Request):
     sid = (body.get("session_id") or "").strip() or f"c-{os.urandom(4).hex()}"
     msg = types.Content(role="user", parts=[types.Part(text=text)])
     return _stream(_run(sid, msg, purse=body.get("purse")), sid)
+
+
+@app.post("/delivered")
+async def delivered(req: Request):
+    """The courier reports back. Nobody was asked anything — this is the world
+    answering, on the ticket it was given, and it resumes the run mid-graph."""
+    body = await req.json()
+    sid = (body.get("session_id") or "").strip()
+    sess = await _sessions.get_session(app_name=APP, user_id=USER, session_id=sid)
+    if sess is None:
+        return {"error": "no such session"}
+    _, parcel = _pending(sess)
+    if not parcel:
+        return {"error": "nothing is out for delivery"}
+    msg = types.Content(role="user", parts=[types.Part(
+        function_response=types.FunctionResponse(
+            id=parcel["call_id"], name="hand_to_courier",
+            response={"status": "delivered", "ticket": parcel["order"]}))])
+    return _stream(_run(sid, msg), sid)
+
+
+@app.get("/queue")
+async def queue() -> dict:
+    """Every case waiting for a stamp, across every customer in the shop.
+
+    This is what the back office reads, and it is the reason an interrupt carries
+    an id: the answer comes back from a different screen, so it has to say which
+    case it is answering.
+    """
+    listed = await _sessions.list_sessions(app_name=APP)
+    out = []
+    for s in listed.sessions:
+        full = await _sessions.get_session(app_name=APP, user_id=s.user_id, session_id=s.id)
+        if full is None:
+            continue
+        stamp, _ = _pending(full)
+        if stamp:
+            out.append({"session_id": full.id, "user_id": s.user_id, "interrupt_id": stamp["id"],
+                        "message": stamp["message"], "case": stamp["payload"],
+                        "at": full.events[-1].timestamp if full.events else None})
+    return {"queue": out, "store": type(_sessions).__name__}
 
 
 @app.post("/stamp")
