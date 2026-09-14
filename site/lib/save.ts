@@ -26,6 +26,13 @@ export function getSave(): SaveFile | null {
   }
 }
 
+// Forget the familiar entirely. Not a patch — a patch would leave the old name
+// underneath it, and the picker only comes back when there is no name at all.
+export function clearSave(): void {
+  try { localStorage.removeItem(KEY); } catch { /* blocked: the picker still returns */ }
+  window.dispatchEvent(new Event("a101-save"));   // same-tab chips refresh live
+}
+
 export function updateSave(patch: Partial<SaveFile>): SaveFile {
   const next = { ...(getSave() ?? EMPTY), ...patch, updatedAt: Date.now() };
   try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* full/blocked: play on */ }
