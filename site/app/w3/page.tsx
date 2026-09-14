@@ -5,7 +5,7 @@ import BackRoom, { type CrewState } from "@/components/BackRoom";
 import FamiliarPicker from "@/components/FamiliarPicker";
 import Monocle, { type MonocleEvent } from "@/components/Monocle";
 import SaveChip from "@/components/SaveChip";
-import { getSave, updateSave, type SaveFile } from "@/lib/save";
+import { clearSave, getSave, updateSave, type SaveFile } from "@/lib/save";
 
 /** Market Street — one counter, two sides.
  *
@@ -322,10 +322,41 @@ export default function MarketStreet() {
     say("sys", next ? "💥 armed — the clerk will faint on the next sale" : "💥 disarmed");
   }
 
-  function fresh() {
+  // ── starting over, three different ways ───────────────────────────────────
+  // Three things can be started over here and they are three different memories,
+  // so they are three different buttons. `fresh` throws away the conversation and
+  // nothing else. `resetShop` asks the street to empty the ledger and refill the
+  // purse. `changeCustomer` forgets the familiar, which the street has never held.
+  function fresh(note = "a new conversation — same customer, same purse") {
     sid.current = newSid(); localStorage.setItem(SID_KEY, sid.current);
     setChat([]); setReceipt([]); setStates({}); setWaiting(null); setEvents([]); setSnap({}); lastBuy.current = null;
-    say("sys", "a new conversation — same customer, same purse");
+    say("sys", note);
+  }
+
+  async function resetShop() {
+    if (!window.confirm("Reset the shop?\n\nThe purse goes back to full, the shelf is restocked and the ledger is emptied. "
+      + "Your familiar stays exactly as it is.")) return;
+    const r = await fetch("/api/w3/reset", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ session_id: sid.current }) }).then((x) => x.json()).catch(() => null);
+    if (!r?.ok) { say("sys", "↺ the street would not reset — " + (r?.error ?? "it isn't answering")); return; }
+    // The ledger it belonged to is gone, so nothing is out any more. The faint is
+    // deliberately left armed: that dial is the back room's, not the shop's.
+    setParcel(null);
+    fresh("↺ opening time again — full purse, full shelf, empty ledger");
+    // The new values came back with the answer, so the counter redraws from those
+    // instead of asking the session what it now holds.
+    const st = (r.state ?? {}) as Record<string, unknown>;
+    setSnap(st);
+    if (typeof st["user:sparks"] === "number") { setPurse(st["user:sparks"] as number); updateSave({ sparks: st["user:sparks"] as number }); }
+    if (st["app:stock"]) setShelf(st["app:stock"] as Record<string, number>);
+    updateSave({ inventory: [] });
+  }
+
+  // The familiar lives in the browser, not in the session — so this one never
+  // touches the street. Clear the save and the picker is the next thing rendered.
+  function changeCustomer() {
+    clearSave();
+    setSave(getSave());
   }
 
   // ── the picture ──────────────────────────────────────────────────────────
@@ -422,9 +453,23 @@ export default function MarketStreet() {
               style={{ width: 38, height: 38, borderRadius: "50%", border: "none", color: "#fff", fontSize: 17,
                 background: "linear-gradient(180deg,var(--violet-soft),var(--violet))", opacity: busy || down || !text.trim() ? .45 : 1 }}>↑</button>
           </div>
-          <button onClick={fresh} className="mono" style={{ alignSelf: "center", marginTop: 8, fontSize: 10.5, color: "var(--faint)", background: "none", border: "none" }}>
-            start a new conversation
-          </button>
+          {/* ── starting over ──────────────────────────────────────────────────
+              All three together, with words on them, on the customer's side of the
+              counter. The ☔ 💥 🧐 dials in the back room break the shop on purpose;
+              these three put it back, and a reader should never have to guess which
+              is which. */}
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+            <div className="mono" style={{ fontSize: 10, letterSpacing: ".16em", textTransform: "uppercase",
+              color: "var(--faint)", textAlign: "center", marginBottom: 8 }}>starting over</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+              <button onClick={() => fresh()} title="a new session id — the ledger, the purse and your familiar all stay"
+                style={{ ...btn("ok"), fontSize: 12.5, padding: "9px 14px" }}>💬 Start a new conversation</button>
+              <button onClick={resetShop} title="the purse, the shelf and the ledger all go back to opening time"
+                style={{ ...btn("no"), fontSize: 12.5, padding: "9px 14px" }}>↺ Reset the shop</button>
+              <button onClick={changeCustomer} title="forget the familiar in this browser and pick another"
+                style={{ ...btn("plain"), fontSize: 12.5, padding: "9px 14px" }}>🎭 Change customer</button>
+            </div>
+          </div>
         </section>
 
         {/* ── the back room ───────────────────────────────────────────── */}
@@ -529,11 +574,15 @@ function bubble(who: "me" | "twill"): React.CSSProperties {
     : { alignSelf: "flex-start", maxWidth: "88%", padding: "11px 14px", borderRadius: 18, borderBottomLeftRadius: 6, fontSize: 14.5, lineHeight: 1.4,
         color: "var(--ink)", background: "#fff", border: "1px solid var(--line)", animation: "riseIn .25s ease both" };
 }
-function btn(kind: "ok" | "no"): React.CSSProperties {
-  return kind === "ok"
-    ? { fontSize: 14.5, fontWeight: 600, padding: "12px 20px", borderRadius: 14, border: "none", color: "#fff", whiteSpace: "nowrap",
-        background: "linear-gradient(180deg,#8ad6bd,#5fb99c)", boxShadow: "0 6px 16px rgba(111,199,173,.35)" }
-    : { fontSize: 14.5, fontWeight: 600, padding: "12px 18px", borderRadius: 14, border: "1.5px solid var(--rose)", color: "#b03e64", background: "#fff", whiteSpace: "nowrap" };
+// Three kinds now: go ahead, careful, and neither. `plain` is the same button said
+// quietly — bordered, so it is findable, without claiming anything is at stake.
+function btn(kind: "ok" | "no" | "plain"): React.CSSProperties {
+  if (kind === "ok")
+    return { fontSize: 14.5, fontWeight: 600, padding: "12px 20px", borderRadius: 14, border: "none", color: "#fff", whiteSpace: "nowrap",
+      background: "linear-gradient(180deg,#8ad6bd,#5fb99c)", boxShadow: "0 6px 16px rgba(111,199,173,.35)" };
+  if (kind === "no")
+    return { fontSize: 14.5, fontWeight: 600, padding: "12px 18px", borderRadius: 14, border: "1.5px solid var(--rose)", color: "#b03e64", background: "#fff", whiteSpace: "nowrap" };
+  return { fontSize: 14.5, fontWeight: 600, padding: "12px 18px", borderRadius: 14, border: "1.5px solid var(--line)", color: "var(--violet)", background: "#fff", whiteSpace: "nowrap" };
 }
 function Icon({ children, on, hot, title, onClick }: { children: React.ReactNode; on: boolean; hot?: boolean; title: string; onClick: () => void }) {
   return (

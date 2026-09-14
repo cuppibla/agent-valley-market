@@ -30,6 +30,7 @@ import forge  # noqa: F401,E402  — settles Vertex-vs-key config for every surf
 from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import StreamingResponse  # noqa: E402
+from google.adk.events import Event, EventActions  # noqa: E402
 from google.adk.runners import Runner  # noqa: E402
 from google.adk.sessions import InMemorySessionService  # noqa: E402
 from google.adk.sessions.sqlite_session_service import SqliteSessionService  # noqa: E402,F401
@@ -39,7 +40,7 @@ from google.genai import types  # noqa: E402
 
 from street.auditor import Auditor  # noqa: E402
 from street.lookups import ITEMS, OPENING_STOCK, START_PURSE  # noqa: E402
-from street.state import ORDERS, SPARKS, STOCK  # noqa: E402
+from street.state import CASE, INVENTORY, ORDERS, SPARKS, STOCK  # noqa: E402
 
 log = logging.getLogger(__name__)
 app = FastAPI(title="Agent 101 · W3 Market Street")
@@ -350,6 +351,39 @@ async def queue() -> dict:
                         "message": stamp["message"], "case": stamp["payload"],
                         "at": full.events[-1].timestamp if full.events else None})
     return {"queue": out, "store": type(_sessions).__name__}
+
+
+@app.post("/reset")
+async def reset(req: Request) -> dict:
+    """Opening time again: a full purse, a full shelf, and nothing in the ledger.
+
+    This resets the SHOP, not the customer. The familiar's name and portrait are
+    not in the session at all — they are the browser's save file — so there is
+    nothing here that could forget them, and the button that does lives there.
+
+    The write goes the way every other write in this shop goes: a state delta on
+    an event, appended to the session. The session service is the thing that knows
+    `user:` follows the customer and `app:` belongs to the shop, and it only knows
+    it because the delta went through it.
+    """
+    body = await req.json()
+    sid = (body.get("session_id") or "").strip()
+    if not sid:
+        return {"error": "session_id is required"}
+    sess = await _sessions.get_session(app_name=APP, user_id=USER, session_id=sid)
+    if sess is None:
+        sess = await _sessions.create_session(app_name=APP, user_id=USER, session_id=sid)
+    # A copy of the opening shelf. `OPENING_STOCK` is one dict for the whole
+    # process, and handing it to the session would mean the next sale sells from
+    # the constant — which then never opens full again.
+    opening = {SPARKS: START_PURSE, INVENTORY: [], STOCK: dict(OPENING_STOCK),
+               ORDERS: {}, CASE: {}}
+    await _sessions.append_event(sess, Event(
+        author="shop", invocation_id=f"reset-{os.urandom(4).hex()}",
+        actions=EventActions(state_delta=dict(opening))))
+    # Handed back rather than left to be fetched: the browser has just thrown away
+    # everything it was drawing, and one round trip is one fewer empty frame.
+    return {"ok": True, "state": opening}
 
 
 @app.post("/stamp")
