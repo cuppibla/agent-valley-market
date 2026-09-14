@@ -15,18 +15,29 @@ everything you need to run the thing is in this repo.
 ```bash
 git clone https://github.com/cuppibla/agent-valley-market
 cd agent-valley-market
-uv sync
-cp .env.example .env
+./setup_project.sh    # a fresh billing-linked project, id in ~/project_id.txt
+./setup_codelab.sh    # Vertex AI on, uv sync, writes .env, one real Gemini call
 uv run python scripts/preflight.py
 ```
 
-`.env.example` defaults to **Vertex AI**, so it picks up whatever project `gcloud` is
-pointed at — nothing to edit and no key to paste.
+Those two are what the codelab runs, so the README and the codelab take the same path.
+`setup_codelab.sh` writes `.env` for you — Vertex AI on the project the first script
+made, nothing to edit and no key to paste.
+
+**Already have a project you want to use?** Skip both and do it by hand:
+
+```bash
+uv sync
+cp .env.example .env
+```
+
+`.env.example` defaults to **Vertex AI** too, so it picks up whatever project `gcloud`
+is pointed at.
 
 Then two surfaces, each right before you need it:
 
 ```bash
-uv run adk web .
+uv run adk web . --allow_origins="*"
 ```
 
 ```bash
@@ -49,7 +60,7 @@ street on `:8300` and the shop on `:3200`.
 Once the ledger is in a file, the workbench can read the shop's own sessions:
 
 ```bash
-uv run adk web --session_service_uri=sqlite:///market.db .
+uv run adk web --session_service_uri=sqlite:///market.db . --allow_origins="*"
 ```
 
 Three slashes. Two (`sqlite://market.db`) silently means "in memory".
