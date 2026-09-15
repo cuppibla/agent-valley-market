@@ -51,7 +51,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 APP, USER = "street", "user"
 
 # ── where the shop keeps its memory ─────────────────────────────────────────
-# 👉 EDIT THREE — chapter 4. This is the whole edit. Replace the line below with:
+# 👉 EDIT TWO — chapter 4. This is the whole edit. Replace the line below with:
 #
 #     _sessions = SqliteSessionService("market.db")
 #
