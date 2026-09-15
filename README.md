@@ -51,8 +51,8 @@ street on `:8300` and the shop on `:3200`.
 
 | | |
 |---|---|
-| `street/agent.py` | the workflow you edit — two of the three edits, both one line |
-| `street/service.py` | the shop's back end — the third edit: where the ledger lives |
+| `street/agent.py` | the workflow you edit — one of the two edits, one line |
+| `street/service.py` | the shop's back end — the other edit: where the ledger lives |
 | `street/lookups.py` | the stall: three things for sale, plain data |
 | `site/` | Market Street itself (Next.js) — the counter, the back room, the Monocle |
 | `forge/` | the **shared runtime** — identical in every week of the series |

@@ -19,11 +19,10 @@ with no stamp on it — and the run that picks it up again is a different turn, 
 different process, possibly tomorrow. Which is why, after a pause, **the edge
 carries nothing and the ledger carries everything.** Read `charge`.
 
-The keys are declared once, in `street/state.py`. Three edits, three chapters:
+The keys are declared once, in `street/state.py`. Two edits, two chapters:
 
-    EDIT ONE    chapter 2   one line in `charge`       the ledger makes a retry safe
-    EDIT TWO    chapter 3   one word in the edges      a manager the graph waits for
-    EDIT THREE  chapter 4   one line in `service.py`   the ledger survives the night
+    EDIT ONE    chapter 3   one word in the edges      a manager the graph waits for
+    EDIT TWO    chapter 4   one line in `service.py`   the ledger survives the night
 """
 
 from __future__ import annotations
@@ -198,9 +197,7 @@ def charge(ctx: Context, node_input: Any):
         return Event(message="charge · no parcel out for delivery", output=None)
     order = {"key": key, **ledger[key]}
 
-    # 👉 EDIT ONE — chapter 2. Add this line, then save:
-    #
-    #     if ledger[key].get("charged"): return seen(ctx, key, order)
+    if ledger[key].get("charged"): return seen(ctx, key, order)
 
     purse = int(ctx.state.get(SPARKS, START_PURSE))
     ctx.state[SPARKS] = purse - order["price"]
@@ -390,7 +387,7 @@ root_agent = Workflow(
         (clerk, route),
         (reserve, dispatch, charge, grant, reply),
         (verify,
-         # 👉 EDIT TWO — chapter 3. Add `approve,` on the next line. One word: the
+         # 👉 EDIT ONE — chapter 3. Add `approve,` on the next line. One word: the
          #    graph now stops here and waits for the back office before any sparks move.
 
          refund, reply),
